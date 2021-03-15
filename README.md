@@ -3,6 +3,7 @@
 ## 思路参考
 * https://zhuanlan.zhihu.com/p/356155386
 * https://zhuanlan.zhihu.com/p/356518467
+* 判题器 https://github.com/B1ACK917/2021HWAutoGrader
 
 ## 题目分析
 * 离线题目，可以一次性读入和输出
