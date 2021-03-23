@@ -1,4 +1,5 @@
 .cmake/
+CodeCraft-2021
 # CMake.gitignore
 CMakeLists.txt.user
 CMakeCache.txt

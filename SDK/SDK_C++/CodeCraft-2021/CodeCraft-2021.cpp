@@ -4,9 +4,8 @@
 #include <cstdio>
 #include <algorithm>
 
-class CommonFunctions
+namespace common
 {
-public:
 	inline int read_int()
 	{
 		char c = std::getchar();
@@ -25,20 +24,15 @@ public:
 		}
 		return x * y;
 	}
-
-	CommonFunctions() {}
 };
 
 class Server
 {
-private:
-	CommonFunctions *function_set;
-
 public:
 	struct ServerInfo
 	{
 		std::string server_name;
-		int CPU;
+		int core;
 		int memory;
 		int buy_cost;
 		int daily_cost;
@@ -62,10 +56,10 @@ public:
 				server[i].server_name += c;
 				c = std::getchar();
 			}
-			server[i].CPU = function_set->read_int();
-			server[i].memory = function_set->read_int();
-			server[i].buy_cost = function_set->read_int();
-			server[i].daily_cost = function_set->read_int();
+			server[i].core = common::read_int();
+			server[i].memory = common::read_int();
+			server[i].buy_cost = common::read_int();
+			server[i].daily_cost = common::read_int();
 		}
 	}
 
@@ -74,7 +68,7 @@ public:
 		for (int i = 0; i < num_of_server; ++i)
 		{
 			std::cout << server[i].server_name << ": ";
-			printf("%dC %dG $%d $%d\n", server[i].CPU, server[i].memory, server[i].buy_cost, server[i].daily_cost);
+			printf("%dC %dG $%d $%d\n", server[i].core, server[i].memory, server[i].buy_cost, server[i].daily_cost);
 		}
 	}
 
@@ -83,14 +77,11 @@ public:
 
 class VirtualMachine
 {
-private:
-	CommonFunctions *function_set;
-
 public:
 	struct VMInfo
 	{
 		std::string VM_name;
-		int CPU;
+		int core;
 		int memory;
 		bool deploy_type;
 	};
@@ -113,9 +104,9 @@ public:
 				VM[i].VM_name += c;
 				c = std::getchar();
 			}
-			VM[i].CPU = function_set->read_int();
-			VM[i].memory = function_set->read_int();
-			VM[i].deploy_type = function_set->read_int();
+			VM[i].core = common::read_int();
+			VM[i].memory = common::read_int();
+			VM[i].deploy_type = common::read_int();
 		}
 	}
 
@@ -124,7 +115,7 @@ public:
 		for (int i = 0; i < num_of_vm; ++i)
 		{
 			std::cout << VM[i].VM_name << ": ";
-			printf("%dC %dG %d\n", VM[i].CPU, VM[i].memory, VM[i].deploy_type);
+			printf("%dC %dG %d\n", VM[i].core, VM[i].memory, VM[i].deploy_type);
 		}
 	}
 
@@ -133,15 +124,15 @@ public:
 
 int main()
 {
-	Server *server = new Server();
-	server->ServerInit();
+	Server server;
+	server.ServerInit();
 #ifdef DEBUG
-	server->ShowServerInfo();
+	server.ShowServerInfo();
 #endif
-	VirtualMachine *VM = new VirtualMachine();
-	VM->VMInit();
+	VirtualMachine VM;
+	VM.VMInit();
 #ifdef DEBUG
-	VM->ShowVMInfo();
+	VM.ShowVMInfo();
 #endif
 	return 0;
 }
