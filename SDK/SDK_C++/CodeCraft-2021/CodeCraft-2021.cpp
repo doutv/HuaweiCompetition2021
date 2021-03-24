@@ -323,7 +323,7 @@ public:
 int main()
 {
 #ifdef DEBUG
-	// const char *test_file_path = "../training1.txt";
+	// const char *test_file_path = "../../training1.txt";
 	// freopen(test_file_path, "r", stdin);
 #endif
 	// 读取所有输入数据
