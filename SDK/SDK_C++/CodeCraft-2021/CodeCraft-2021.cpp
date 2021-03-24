@@ -28,6 +28,8 @@ namespace common
 	{
 		string res;
 		char c = std::getchar();
+		while (c == ' ' || c == ',' || c == '(')
+			c = getchar();
 		while (c != ',')
 		{
 			res += c;
@@ -58,7 +60,7 @@ public:
 	int32_t num_of_server;
 	static const int32_t server_max_size = 100;
 	ServerInfo server[server_max_size];
-	unordered_map<string, ServerInfo *> servername2info_map;
+	unordered_map<string, reference_wrapper<ServerInfo>> servername2info_map;
 	void Init()
 	{
 		cin >> num_of_server;
@@ -70,12 +72,12 @@ public:
 			server[i].memory = common::read_int();
 			server[i].buy_cost = common::read_int();
 			server[i].daily_cost = common::read_int();
-			servername2info_map.emplace(server[i].server_name, &server[i]);
+			servername2info_map.emplace(server[i].server_name, server[i]);
 		}
 	}
-	const ServerInfo &GetServerInfoByName(const string &server_name) const
+	ServerInfo &GetServerInfoByName(string server_name) const
 	{
-		return *servername2info_map.at(server_name);
+		return servername2info_map.at(server_name);
 	}
 	void PrintInfo()
 	{
@@ -103,7 +105,7 @@ public:
 	int32_t num_of_vm;
 	static const int32_t vm_max_size = 1000;
 	VMInfo vm[vm_max_size];
-	unordered_map<string, VMInfo *> vmname2info_map;
+	unordered_map<string, reference_wrapper<VMInfo>> vmname2info_map;
 	void Init()
 	{
 		cin >> num_of_vm;
@@ -114,10 +116,10 @@ public:
 			vm[i].core = common::read_int();
 			vm[i].memory = common::read_int();
 			vm[i].deploy_type = common::read_int();
-			vmname2info_map.emplace(vm[i].vm_name, &vm[i]);
+			vmname2info_map.emplace(vm[i].vm_name, vm[i]);
 		}
 	}
-	const VMInfo *GetVMInfoByName(const string &vm_name) const
+	VMInfo &GetVMInfoByName(string vm_name) const
 	{
 		return vmname2info_map.at(vm_name);
 	}
@@ -194,13 +196,13 @@ class RunningVM
 	// 当前在运行的 vm 序列
 public:
 	const VirtualMachine &vm;
-	unordered_map<int32_t, VirtualMachine::VMInfo *> vmid2info_map;
+	unordered_map<int32_t, reference_wrapper<VirtualMachine::VMInfo>> vmid2info_map;
 	set<int32_t> vmid_set;
-	const VirtualMachine::VMInfo &GetVMInfoById(int32_t vm_id) const
+	VirtualMachine::VMInfo &GetVMInfoById(int32_t vm_id) const
 	{
-		return *vmid2info_map.at(vm_id);
+		return vmid2info_map.at(vm_id);
 	}
-	void AddVM(int32_t vm_id, const VirtualMachine::VMInfo *vm_info)
+	void AddVM(int32_t vm_id, VirtualMachine::VMInfo &vm_info)
 	{
 		vmid_set.emplace(vm_id);
 		vmid2info_map.emplace(vm_id, vm_info);
@@ -219,17 +221,17 @@ class BoughtServer
 	// 可能处于关机状态
 public:
 	const Server &server;
-	unordered_map<int32_t, Server::ServerInfo *> serverid2info_map;
+	unordered_map<int32_t, reference_wrapper<Server::ServerInfo>> serverid2info_map;
 	set<int32_t> serverid_set;
-	const Server::ServerInfo &GetServerInfoById(const int32_t server_id) const
+	Server::ServerInfo &GetServerInfoById(int32_t server_id) const
 	{
-		return *serverid2info_map.at(server_id);
+		return serverid2info_map.at(server_id);
 	}
-	int64_t BuyServer(const int32_t server_id, Server::ServerInfo *server_info)
+	int64_t BuyServer(int32_t server_id, Server::ServerInfo &server_info)
 	{
 		serverid_set.emplace(server_id);
 		serverid2info_map.emplace(server_id, server_info);
-		return server_info->buy_cost;
+		return server_info.buy_cost;
 	}
 	BoughtServer(const Server &server) : server(server) {}
 };
@@ -258,18 +260,18 @@ public:
 		}
 		return daily_cost;
 	}
-	void AssignServer2VM(int32_t server_id, int32_t vm_id, const VirtualMachine::VMInfo *vm_info)
+	void AssignServer2VM(int32_t server_id, int32_t vm_id, VirtualMachine::VMInfo &vm_info)
 	{
 		vmid2serverid_map.emplace(vm_id, server_id);
 		running_vm.AddVM(vm_id, vm_info);
 	}
 	bool TryAssignSleepingServer2VM(VMRequest::Req req)
 	{
-		const VirtualMachine::VMInfo *vm_info = virtual_machine.GetVMInfoByName(req.vm_name);
+		VirtualMachine::VMInfo &vm_info = virtual_machine.GetVMInfoByName(req.vm_name);
 		for (int32_t server_id : sleeping_serverid_set)
 		{
-			const Server::ServerInfo &server_info = bought_server.GetServerInfoById(server_id);
-			if (server_info.core >= vm_info->core && server_info.memory >= vm_info->memory)
+			Server::ServerInfo &server_info = bought_server.GetServerInfoById(server_id);
+			if (server_info.core >= vm_info.core && server_info.memory >= vm_info.memory)
 			{
 				// greedy assign sleeping server to vm
 				AssignServer2VM(server_id, req.vm_id, vm_info);
