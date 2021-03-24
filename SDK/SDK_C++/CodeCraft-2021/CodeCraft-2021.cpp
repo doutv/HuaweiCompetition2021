@@ -6,7 +6,9 @@
 #include <vector>
 #include <unordered_map>
 #include <set>
+#include <functional>
 using namespace std;
+
 namespace common
 {
 	inline int32_t read_int()
@@ -115,9 +117,9 @@ public:
 			vmname2info_map.emplace(vm[i].vm_name, &vm[i]);
 		}
 	}
-	const VMInfo &GetVMInfoByName(const string &vm_name) const
+	const VMInfo *GetVMInfoByName(const string &vm_name) const
 	{
-		return *vmname2info_map.at(vm_name);
+		return vmname2info_map.at(vm_name);
 	}
 	void PrintInfo()
 	{
@@ -141,7 +143,7 @@ public:
 		std::string vm_name;
 		int32_t vm_id;
 	};
-	vector<vector<Req>> req;
+	vector<vector<Req>> req_list;
 
 	void Init()
 	{
@@ -169,13 +171,13 @@ public:
 				}
 				today_req.push_back(cur_req);
 			}
-			req.push_back(today_req);
+			req_list.push_back(today_req);
 		}
 	}
 
 	void PrintInfo()
 	{
-		for (auto day_req : req)
+		for (auto day_req : req_list)
 		{
 			for (auto cur_req : day_req)
 			{
@@ -194,11 +196,11 @@ public:
 	const VirtualMachine &vm;
 	unordered_map<int32_t, VirtualMachine::VMInfo *> vmid2info_map;
 	set<int32_t> vmid_set;
-	const VirtualMachine::VMInfo &GetVMInfoById(int32_t vm_id)
+	const VirtualMachine::VMInfo &GetVMInfoById(int32_t vm_id) const
 	{
 		return *vmid2info_map.at(vm_id);
 	}
-	void AddVM(int32_t vm_id, VirtualMachine::VMInfo *vm_info)
+	void AddVM(int32_t vm_id, const VirtualMachine::VMInfo *vm_info)
 	{
 		vmid_set.emplace(vm_id);
 		vmid2info_map.emplace(vm_id, vm_info);
@@ -219,7 +221,7 @@ public:
 	const Server &server;
 	unordered_map<int32_t, Server::ServerInfo *> serverid2info_map;
 	set<int32_t> serverid_set;
-	const Server::ServerInfo &GetServerInfoById(const int32_t server_id)
+	const Server::ServerInfo &GetServerInfoById(const int32_t server_id) const
 	{
 		return *serverid2info_map.at(server_id);
 	}
@@ -241,24 +243,12 @@ public:
 	BoughtServer bought_server;
 
 	vector<Server::ServerInfo> server_list;
-	unordered_map<int32_t, Server::ServerInfo *> vm2server_map;
+	unordered_map<int32_t, int32_t> vmid2serverid_map;
 	set<int32_t> running_serverid_set;
 	set<int32_t> sleeping_serverid_set;
 	int64_t total_cost;
 	int32_t today;
-	// void BuyAllServerAtFirst()
-	// {
-	// 	for (auto day_req : request.req)
-	// 	{
-	// 		for (auto each_req : day_req)
-	// 		{
-	// 			// skip del type
-	// 			if (each_req.req_type == 0)
-	// 				continue;
-	// 			const VirtualMachine::VMInfo &cur_vm = *vm.vmname2info_map.at(each_req.vm_name);
-	// 		}
-	// 	}
-	// }
+
 	int64_t EvaluateDailyCost()
 	{
 		int64_t daily_cost = 0;
@@ -268,18 +258,21 @@ public:
 		}
 		return daily_cost;
 	}
-	void AssignServer2VM(int32_t server_id, const VirtualMachine::VMInfo &vm)
+	void AssignServer2VM(int32_t server_id, int32_t vm_id, const VirtualMachine::VMInfo *vm_info)
 	{
+		vmid2serverid_map.emplace(vm_id, server_id);
+		running_vm.AddVM(vm_id, vm_info);
 	}
-	bool TryAssignSleepingServer2VM(const VirtualMachine::VMInfo &vm)
+	bool TryAssignSleepingServer2VM(VMRequest::Req req)
 	{
+		const VirtualMachine::VMInfo *vm_info = virtual_machine.GetVMInfoByName(req.vm_name);
 		for (int32_t server_id : sleeping_serverid_set)
 		{
 			const Server::ServerInfo &server_info = bought_server.GetServerInfoById(server_id);
-			if (server_info.core >= vm.core && server_info.memory >= vm.memory)
+			if (server_info.core >= vm_info->core && server_info.memory >= vm_info->memory)
 			{
 				// greedy assign sleeping server to vm
-				AssignServer2VM(server_id, vm);
+				AssignServer2VM(server_id, req.vm_id, vm_info);
 				sleeping_serverid_set.erase(server_id);
 				running_serverid_set.emplace(server_id);
 				return true;
@@ -287,20 +280,19 @@ public:
 		}
 		return false;
 	}
-	void BuyServerBasedOnVM(const VirtualMachine::VMInfo &vm)
+	void BuyServerBasedOnReq(VMRequest::Req req)
 	{
 	}
 	void Buy()
 	{
 		// total_cost += bought_server.BuyServer();
-		for (const VMRequest::Req &cur_req : request.req.at(today))
+		for (const VMRequest::Req &req : request.req_list.at(today))
 		{
 			// skip del type
-			if (cur_req.req_type == 0)
+			if (req.req_type == 0)
 				continue;
-			const VirtualMachine::VMInfo &cur_vm = virtual_machine.GetVMInfoByName(cur_req.vm_name);
-			if (!TryAssignSleepingServer2VM(cur_vm))
-				BuyServerBasedOnVM(cur_vm);
+			if (!TryAssignSleepingServer2VM(req))
+				BuyServerBasedOnReq(req);
 		}
 	}
 	void Migrate()
