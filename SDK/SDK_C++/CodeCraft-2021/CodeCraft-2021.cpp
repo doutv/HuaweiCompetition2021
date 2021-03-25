@@ -231,16 +231,11 @@ class BoughtServer
 public:
 	const Server &server;
 	unordered_map<int32_t, reference_wrapper<Server::ServerInfo>> serverid2info_map;
-	unordered_map<Server::ServerInfo*,int32_t> serverinfo2id_map;
 	set<int32_t> serverid_set;
 	int32_t nxt_server_id;
 	Server::ServerInfo &GetServerInfoById(int32_t server_id) const
 	{
 		return serverid2info_map.at(server_id);
-	}
-	int32_t GetServerIdByInfo(Server::ServerInfo &server_info) const
-	{
-		return serverinfo2id_map.at(&server_info);
 	}
 	pair<int64_t, int32_t> BuyServer(Server::ServerInfo &server_info, int32_t num)
 	{
@@ -252,7 +247,6 @@ public:
 			int32_t server_id = st_server_id + i;
 			serverid_set.emplace(server_id);
 			serverid2info_map.emplace(server_id, server_info);
-			serverinfo2id_map.emplace(&server_info, server_id);
 			total_buy_cost += server_info.buy_cost;
 		}
 		return make_pair(total_buy_cost, st_server_id);
@@ -280,7 +274,15 @@ public:
 
 	unordered_map<string, int32_t> today_buy_servername2num_map;
 	unordered_multimap<Server::ServerInfo *, int32_t> today_serverinfo2vmid_multimap;
-
+	typedef pair<Server::ServerInfo, int32_t> serverinfo_id_t;
+	class ServerInfoIdCompare
+	{
+	public:
+		bool operator()(serverinfo_id_t x, serverinfo_id_t y)
+		{
+			return x.first > y.first;
+		}
+	};
 	void EvaluateDailyCost()
 	{
 		int64_t daily_cost = 0;
@@ -292,21 +294,21 @@ public:
 	}
 	bool TryAssignSleepingServer2VM(VMRequest::Req req)
 	{
-		priority_queue<Server::ServerInfo, vector<Server::ServerInfo>, greater<Server::ServerInfo>> q;
+		priority_queue<serverinfo_id_t, vector<serverinfo_id_t>, ServerInfoIdCompare> q;
 		VirtualMachine::VMInfo &vm_info = virtual_machine.GetVMInfoByName(req.vm_name);
 		for (int32_t server_id : sleeping_serverid_set)
 		{
 			auto server_info = bought_server.GetServerInfoById(server_id);
 			if (server_info.core >= vm_info.core && server_info.memory >= vm_info.memory)
 			{
-				q.push(server_info);
+				q.push(make_pair(server_info,server_id));
 			}
 		}
 		if (!q.empty())
 		{
-			auto &server_info = server.GetServerInfoByName(q.top().server_name);
-			int32_t server_id = bought_server.GetServerIdByInfo(server_info);
+			int32_t server_id = q.top().second;
 			vmid2serverid_map.emplace(req.vm_id, server_id);
+			sleeping_serverid_set.erase(server_id);
 			return true;
 		}
 		else
@@ -337,8 +339,8 @@ public:
 			if (req.req_type == 0)
 				// skip del type
 				continue;
-			// if (!TryAssignSleepingServer2VM(req))
-			OrderServerBasedOnReq(req);
+			if (!TryAssignSleepingServer2VM(req))
+				OrderServerBasedOnReq(req);
 		}
 		// 输出购买信息
 		printf("(purchase, %zu)\n", today_buy_servername2num_map.size());
@@ -415,6 +417,8 @@ int main()
 #ifdef DEBUG_LOCAL
 	const char *test_file_path = "/home/jason/HuaWei_Contest/SDK/training-1.txt";
 	freopen(test_file_path, "r", stdin);
+	const char *output_file_path = "/home/jason/HuaWei_Contest/SDK/training-1.out";
+	freopen(output_file_path, "w", stdout);
 #endif
 	// 读取所有输入数据
 	Server server;
