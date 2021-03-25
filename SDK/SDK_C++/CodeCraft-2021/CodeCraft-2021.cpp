@@ -3,11 +3,13 @@
 #include <iostream>
 #include <cstdio>
 #include <algorithm>
+#include <queue>
 #include <vector>
 #include <unordered_map>
 #include <set>
 #include <functional>
 using namespace std;
+
 
 namespace common
 {
@@ -55,8 +57,12 @@ public:
 		int32_t memory;
 		int32_t buy_cost;
 		int32_t daily_cost;
+		bool operator<(const ServerInfo &other) const
+		{
+			return buy_cost < other.buy_cost;
+		}
 	};
-
+	
 	int32_t num_of_server;
 	static const int32_t server_max_size = 100;
 	ServerInfo server[server_max_size];
@@ -90,7 +96,17 @@ public:
 
 	Server() {}
 };
-
+// namespace std 
+// 	{
+// 		template<>
+// 		struct hash<reference_wrapper<Server::ServerInfo>>
+// 		{
+// 			size_t operator()(const reference_wrapper<Server::ServerInfo>& r) const
+// 			{
+// 				return std::hash<std::string>{}(r.get().server_name);
+// 			}
+// 		}; 
+// 	}
 class VirtualMachine
 {
 public:
@@ -210,6 +226,7 @@ public:
 	void DelVM(int32_t vm_id)
 	{
 		vmid_set.erase(vm_id);
+		vmid2info_map.erase(vm_id);
 	}
 
 	RunningVM(const VirtualMachine &vm) : vm(vm) {}
@@ -223,17 +240,29 @@ public:
 	const Server &server;
 	unordered_map<int32_t, reference_wrapper<Server::ServerInfo>> serverid2info_map;
 	set<int32_t> serverid_set;
+	int32_t nxt_server_id;
 	Server::ServerInfo &GetServerInfoById(int32_t server_id) const
 	{
 		return serverid2info_map.at(server_id);
 	}
-	int64_t BuyServer(int32_t server_id, Server::ServerInfo &server_info)
+	pair<int64_t, int32_t> BuyServer(Server::ServerInfo &server_info, int32_t num)
 	{
-		serverid_set.emplace(server_id);
-		serverid2info_map.emplace(server_id, server_info);
-		return server_info.buy_cost;
+		int64_t total_buy_cost = 0;
+		int32_t st_server_id = nxt_server_id;
+		nxt_server_id += num;
+		for (int32_t i = 0; i < num; i++)
+		{
+			int32_t server_id = st_server_id + i;
+			serverid_set.emplace(server_id);
+			serverid2info_map.emplace(server_id, server_info);
+			total_buy_cost += server_info.buy_cost;
+		}
+		return make_pair(total_buy_cost, st_server_id);
 	}
-	BoughtServer(const Server &server) : server(server) {}
+	BoughtServer(const Server &server) : server(server)
+	{
+		nxt_server_id = 0;
+	}
 };
 class Greedy
 {
@@ -249,21 +278,19 @@ public:
 	set<int32_t> running_serverid_set;
 	set<int32_t> sleeping_serverid_set;
 	int64_t total_cost;
-	int32_t today;
+	int32_t today_id;
 
-	int64_t EvaluateDailyCost()
+	unordered_map<string, int32_t> today_buy_servername2num_map;
+	unordered_multimap<Server::ServerInfo*, int32_t> today_serverinfo2vmid_multimap;
+
+	void EvaluateDailyCost()
 	{
 		int64_t daily_cost = 0;
 		for (int32_t server_id : running_serverid_set)
 		{
 			daily_cost += bought_server.GetServerInfoById(server_id).daily_cost;
 		}
-		return daily_cost;
-	}
-	void AssignServer2VM(int32_t server_id, int32_t vm_id, VirtualMachine::VMInfo &vm_info)
-	{
-		vmid2serverid_map.emplace(vm_id, server_id);
-		running_vm.AddVM(vm_id, vm_info);
+		total_cost += daily_cost;
 	}
 	bool TryAssignSleepingServer2VM(VMRequest::Req req)
 	{
@@ -274,7 +301,7 @@ public:
 			if (server_info.core >= vm_info.core && server_info.memory >= vm_info.memory)
 			{
 				// greedy assign sleeping server to vm
-				AssignServer2VM(server_id, req.vm_id, vm_info);
+				vmid2serverid_map.emplace(req.vm_id, server_id);
 				sleeping_serverid_set.erase(server_id);
 				running_serverid_set.emplace(server_id);
 				return true;
@@ -282,19 +309,50 @@ public:
 		}
 		return false;
 	}
-	void BuyServerBasedOnReq(VMRequest::Req req)
+	void OrderServerBasedOnReq(VMRequest::Req req)
 	{
+		priority_queue<Server::ServerInfo> q;
+		auto vm_info = virtual_machine.GetVMInfoByName(req.vm_name);
+		for (auto each : server.server)
+		{
+			if (each.core >= vm_info.core && each.memory >= vm_info.memory)
+				q.push(each);
+		}
+		auto server_info = q.top();
+		++today_buy_servername2num_map[server_info.server_name];
+		// bind vmid to server
+		today_serverinfo2vmid_multimap.emplace(&server_info, req.vm_id);
 	}
 	void Buy()
 	{
-		// total_cost += bought_server.BuyServer();
-		for (const VMRequest::Req &req : request.req_list.at(today))
+		today_buy_servername2num_map.clear();
+		today_serverinfo2vmid_multimap.clear();
+		for (const VMRequest::Req &req : request.req_list.at(today_id))
 		{
-			// skip del type
 			if (req.req_type == 0)
+				// skip del type
 				continue;
 			if (!TryAssignSleepingServer2VM(req))
-				BuyServerBasedOnReq(req);
+				OrderServerBasedOnReq(req);
+		}
+		// 输出购买信息
+		cout << "(purchase, " << today_buy_servername2num_map.size() << ")" << endl;
+		for (auto &it : today_buy_servername2num_map)
+		{
+			string server_name = it.first;
+			int32_t num = it.second;
+			auto server_info = server.GetServerInfoByName(server_name);
+			pair<int64_t, int32_t> p = bought_server.BuyServer(server_info, num);
+			int64_t buy_cost = p.first;
+			int32_t st_server_id = p.second;
+			total_cost += buy_cost;
+			auto multimap_its = today_serverinfo2vmid_multimap.equal_range(&server_info);
+			for (auto each_it = multimap_its.first; each_it != multimap_its.second; ++each_it)
+			{
+				int32_t vm_id = each_it->second;
+				vmid2serverid_map.emplace(vm_id, st_server_id++);
+			}
+			cout << "(" << server_name << ", " << num << ")" << endl;
 		}
 	}
 	void Migrate()
@@ -302,18 +360,32 @@ public:
 	}
 	void ProcessRequest()
 	{
+		for (auto const &req : request.req_list.at(today_id))
+		{
+			if (req.req_type == 0)
+			{
+				// del
+				running_vm.DelVM(req.vm_id);
+			}
+			else
+			{
+				auto &vm_info = virtual_machine.GetVMInfoByName(req.vm_name);
+				running_vm.AddVM(req.vm_id, vm_info);
+				// output server_id and 单双节点
+			}
+		}
 	}
 	void Simulate()
 	{
 		// 对于每一天的操作，会先按顺序执行选手输出的购买操作，然后按顺序执行选手输出的迁移操作，最后按顺序执行当天的创建和删除操作。
 		// 输入中可能存在当天创建后当天删除的虚拟机，对于这些虚拟机请求，你依然需要按顺序正常处理。
 		// BuyAllServerAtFirst();
-		for (today = 0; today < request.num_of_day; today++)
+		for (today_id = 0; today_id < request.num_of_day; today_id++)
 		{
 			Buy();
 			Migrate();
 			ProcessRequest();
-			total_cost += EvaluateDailyCost();
+			EvaluateDailyCost();
 		}
 	}
 	Greedy(const Server &server, const VirtualMachine &virtual_machine, const VMRequest &request)
