@@ -1,4 +1,4 @@
-#define DEBUG
+// #define DEBUG_LOCAL
 
 #include <iostream>
 #include <cstdio>
@@ -9,7 +9,6 @@
 #include <set>
 #include <functional>
 using namespace std;
-
 
 namespace common
 {
@@ -61,8 +60,12 @@ public:
 		{
 			return buy_cost < other.buy_cost;
 		}
+		bool operator>(const ServerInfo &other) const
+		{
+			return !(*this < other);
+		}
 	};
-	
+
 	int32_t num_of_server;
 	static const int32_t server_max_size = 100;
 	ServerInfo server[server_max_size];
@@ -96,17 +99,6 @@ public:
 
 	Server() {}
 };
-// namespace std 
-// 	{
-// 		template<>
-// 		struct hash<reference_wrapper<Server::ServerInfo>>
-// 		{
-// 			size_t operator()(const reference_wrapper<Server::ServerInfo>& r) const
-// 			{
-// 				return std::hash<std::string>{}(r.get().server_name);
-// 			}
-// 		}; 
-// 	}
 class VirtualMachine
 {
 public:
@@ -281,7 +273,7 @@ public:
 	int32_t today_id;
 
 	unordered_map<string, int32_t> today_buy_servername2num_map;
-	unordered_multimap<Server::ServerInfo*, int32_t> today_serverinfo2vmid_multimap;
+	unordered_multimap<Server::ServerInfo *, int32_t> today_serverinfo2vmid_multimap;
 
 	void EvaluateDailyCost()
 	{
@@ -302,8 +294,6 @@ public:
 			{
 				// greedy assign sleeping server to vm
 				vmid2serverid_map.emplace(req.vm_id, server_id);
-				sleeping_serverid_set.erase(server_id);
-				running_serverid_set.emplace(server_id);
 				return true;
 			}
 		}
@@ -311,14 +301,16 @@ public:
 	}
 	void OrderServerBasedOnReq(VMRequest::Req req)
 	{
-		priority_queue<Server::ServerInfo> q;
+		priority_queue<Server::ServerInfo, vector<Server::ServerInfo>, greater<Server::ServerInfo>> q;
 		auto vm_info = virtual_machine.GetVMInfoByName(req.vm_name);
 		for (auto each : server.server)
 		{
+			if (each.server_name.empty())
+				break;
 			if (each.core >= vm_info.core && each.memory >= vm_info.memory)
 				q.push(each);
 		}
-		auto server_info = q.top();
+		auto &server_info = server.GetServerInfoByName(q.top().server_name);
 		++today_buy_servername2num_map[server_info.server_name];
 		// bind vmid to server
 		today_serverinfo2vmid_multimap.emplace(&server_info, req.vm_id);
@@ -332,31 +324,33 @@ public:
 			if (req.req_type == 0)
 				// skip del type
 				continue;
-			if (!TryAssignSleepingServer2VM(req))
-				OrderServerBasedOnReq(req);
+			// if (!TryAssignSleepingServer2VM(req))
+			OrderServerBasedOnReq(req);
 		}
 		// 输出购买信息
-		cout << "(purchase, " << today_buy_servername2num_map.size() << ")" << endl;
+		printf("(purchase, %zu)\n", today_buy_servername2num_map.size());
 		for (auto &it : today_buy_servername2num_map)
 		{
 			string server_name = it.first;
 			int32_t num = it.second;
-			auto server_info = server.GetServerInfoByName(server_name);
+			auto &server_info = server.GetServerInfoByName(server_name);
 			pair<int64_t, int32_t> p = bought_server.BuyServer(server_info, num);
 			int64_t buy_cost = p.first;
 			int32_t st_server_id = p.second;
 			total_cost += buy_cost;
-			auto multimap_its = today_serverinfo2vmid_multimap.equal_range(&server_info);
-			for (auto each_it = multimap_its.first; each_it != multimap_its.second; ++each_it)
+			auto range = today_serverinfo2vmid_multimap.equal_range(&server_info);
+			size_t k = today_serverinfo2vmid_multimap.count(&server_info);
+			for (auto each_it = range.first; each_it != range.second; ++each_it)
 			{
 				int32_t vm_id = each_it->second;
-				vmid2serverid_map.emplace(vm_id, st_server_id++);
+				vmid2serverid_map.emplace(vm_id, st_server_id + (--k));
 			}
-			cout << "(" << server_name << ", " << num << ")" << endl;
+			printf("(%s, %d)\n", server_name.c_str(), num);
 		}
 	}
 	void Migrate()
 	{
+		printf("(migration, 0)\n");
 	}
 	void ProcessRequest()
 	{
@@ -366,12 +360,23 @@ public:
 			{
 				// del
 				running_vm.DelVM(req.vm_id);
+				int32_t server_id = vmid2serverid_map.at(req.vm_id);
+				running_serverid_set.erase(server_id);
+				sleeping_serverid_set.emplace(server_id);
 			}
 			else
 			{
-				auto &vm_info = virtual_machine.GetVMInfoByName(req.vm_name);
+				auto vm_info = virtual_machine.GetVMInfoByName(req.vm_name);
 				running_vm.AddVM(req.vm_id, vm_info);
+				int32_t server_id = vmid2serverid_map.at(req.vm_id);
+				if (sleeping_serverid_set.find(server_id) != sleeping_serverid_set.end())
+					sleeping_serverid_set.erase(server_id);
+				running_serverid_set.emplace(server_id);
 				// output server_id and 单双节点
+				if (vm_info.deploy_type == 0)
+					printf("(%d, A)\n", server_id);
+				else
+					printf("(%d)\n", server_id);
 			}
 		}
 	}
@@ -394,9 +399,9 @@ public:
 
 int main()
 {
-#ifdef DEBUG
-	// const char *test_file_path = "../../training1.txt";
-	// freopen(test_file_path, "r", stdin);
+#ifdef DEBUG_LOCAL
+	const char *test_file_path = "/home/jason/HuaWei_Contest/SDK/training-1.txt";
+	freopen(test_file_path, "r", stdin);
 #endif
 	// 读取所有输入数据
 	Server server;
@@ -405,10 +410,10 @@ int main()
 	server.Init();
 	virtual_machine.Init();
 	request.Init();
-#ifdef DEBUG
-	server.PrintInfo();
-	virtual_machine.PrintInfo();
-	request.PrintInfo();
+#ifdef DEBUG_LOCAL
+	// server.PrintInfo();
+	// virtual_machine.PrintInfo();
+	// request.PrintInfo();
 #endif
 	// 贪心
 	Greedy greedy(server, virtual_machine, request);
