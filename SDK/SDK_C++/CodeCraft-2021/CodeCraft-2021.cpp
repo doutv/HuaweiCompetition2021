@@ -231,11 +231,16 @@ class BoughtServer
 public:
 	const Server &server;
 	unordered_map<int32_t, reference_wrapper<Server::ServerInfo>> serverid2info_map;
+	unordered_map<Server::ServerInfo*,int32_t> serverinfo2id_map;
 	set<int32_t> serverid_set;
 	int32_t nxt_server_id;
 	Server::ServerInfo &GetServerInfoById(int32_t server_id) const
 	{
 		return serverid2info_map.at(server_id);
+	}
+	int32_t GetServerIdByInfo(Server::ServerInfo &server_info) const
+	{
+		return serverinfo2id_map.at(&server_info);
 	}
 	pair<int64_t, int32_t> BuyServer(Server::ServerInfo &server_info, int32_t num)
 	{
@@ -247,6 +252,7 @@ public:
 			int32_t server_id = st_server_id + i;
 			serverid_set.emplace(server_id);
 			serverid2info_map.emplace(server_id, server_info);
+			serverinfo2id_map.emplace(&server_info, server_id);
 			total_buy_cost += server_info.buy_cost;
 		}
 		return make_pair(total_buy_cost, st_server_id);
@@ -286,18 +292,25 @@ public:
 	}
 	bool TryAssignSleepingServer2VM(VMRequest::Req req)
 	{
+		priority_queue<Server::ServerInfo, vector<Server::ServerInfo>, greater<Server::ServerInfo>> q;
 		VirtualMachine::VMInfo &vm_info = virtual_machine.GetVMInfoByName(req.vm_name);
 		for (int32_t server_id : sleeping_serverid_set)
 		{
-			Server::ServerInfo &server_info = bought_server.GetServerInfoById(server_id);
+			auto server_info = bought_server.GetServerInfoById(server_id);
 			if (server_info.core >= vm_info.core && server_info.memory >= vm_info.memory)
 			{
-				// greedy assign sleeping server to vm
-				vmid2serverid_map.emplace(req.vm_id, server_id);
-				return true;
+				q.push(server_info);
 			}
 		}
-		return false;
+		if (!q.empty())
+		{
+			auto &server_info = server.GetServerInfoByName(q.top().server_name);
+			int32_t server_id = bought_server.GetServerIdByInfo(server_info);
+			vmid2serverid_map.emplace(req.vm_id, server_id);
+			return true;
+		}
+		else
+			return false;
 	}
 	void OrderServerBasedOnReq(VMRequest::Req req)
 	{
