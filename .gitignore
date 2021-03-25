@@ -1,6 +1,7 @@
 .cmake/
 **/bin
 **/build
+*.out
 # CMake.gitignore
 CMakeLists.txt.user
 CMakeCache.txt

@@ -1,15 +1,18 @@
 // #define DEBUG_LOCAL
 
+#include <chrono>
 #include <iostream>
 #include <cstdio>
 #include <algorithm>
 #include <queue>
 #include <vector>
 #include <unordered_map>
+#include <unordered_set>
 #include <set>
 #include <functional>
 using namespace std;
 
+auto time_start = chrono::steady_clock::now();
 namespace common
 {
 	inline int32_t read_int()
@@ -295,13 +298,18 @@ public:
 	bool TryAssignSleepingServer2VM(VMRequest::Req req)
 	{
 		priority_queue<serverinfo_id_t, vector<serverinfo_id_t>, ServerInfoIdCompare> q;
+		unordered_set<Server::ServerInfo *> serverinfo_set;
 		VirtualMachine::VMInfo &vm_info = virtual_machine.GetVMInfoByName(req.vm_name);
 		for (int32_t server_id : sleeping_serverid_set)
 		{
-			auto server_info = bought_server.GetServerInfoById(server_id);
+			auto &server_info_ref = bought_server.GetServerInfoById(server_id);
+			auto server_info = server_info_ref;
 			if (server_info.core >= vm_info.core && server_info.memory >= vm_info.memory)
 			{
-				q.push(make_pair(server_info,server_id));
+				if (serverinfo_set.find(&server_info_ref) != serverinfo_set.end())
+					break;
+				serverinfo_set.emplace(&server_info_ref);
+				q.push(make_pair(server_info, server_id));
 			}
 		}
 		if (!q.empty())
@@ -415,9 +423,9 @@ public:
 int main()
 {
 #ifdef DEBUG_LOCAL
-	const char *test_file_path = "/home/jason/HuaWei_Contest/SDK/training-1.txt";
+	const char *test_file_path = "/home/jason/HuaWei_Contest/SDK/training-2.txt";
 	freopen(test_file_path, "r", stdin);
-	const char *output_file_path = "/home/jason/HuaWei_Contest/SDK/training-1.out";
+	const char *output_file_path = "/home/jason/HuaWei_Contest/SDK/training-2.out";
 	freopen(output_file_path, "w", stdout);
 #endif
 	// 读取所有输入数据
@@ -427,13 +435,16 @@ int main()
 	server.Init();
 	virtual_machine.Init();
 	request.Init();
-#ifdef DEBUG_LOCAL
-	// server.PrintInfo();
-	// virtual_machine.PrintInfo();
-	// request.PrintInfo();
-#endif
 	// 贪心
 	Greedy greedy(server, virtual_machine, request);
 	greedy.Simulate();
+#ifdef DEBUG_LOCAL
+	freopen("/dev/tty", "w", stdout);
+	auto time_end = chrono::steady_clock::now();
+	auto diff = time_end - time_start;
+	cout << "The program's speed: " << chrono::duration<double, milli>(diff).count() / 1000 << "s" << endl;
+#endif
+	fclose(stdin);
+	fclose(stdout);
 	return 0;
 }
