@@ -342,7 +342,7 @@ public:
 		}
 		total_cost += daily_cost;
 	}
-	bool TryAssignSleepingServer2VM(VMRequest::Req req, VirtualMachine::VMInfo &vm_info)
+	bool TryAssignEmptyServer2VM(VMRequest::Req req, VirtualMachine::VMInfo &vm_info)
 	{
 		priority_queue<serverinfo_id_t, vector<serverinfo_id_t>, AssignSleepingServerComp> q;
 		unordered_set<Server::ServerInfo *> serverinfo_set;
@@ -369,6 +369,7 @@ public:
 			{
 				int32_t server_id = q.top().second;
 				vmid2serverid_map.emplace(req.vm_id, make_pair(server_id, 0));
+				single_empty_serverid_set.erase(server_id);
 				return true;
 			}
 			// no need to clear q and serverinfo_set
@@ -391,6 +392,7 @@ public:
 		{
 			int32_t server_id = q.top().second;
 			vmid2serverid_map.emplace(req.vm_id, make_pair(server_id, 0));
+			sleeping_serverid_set.erase(server_id);
 			return true;
 		}
 		else
@@ -421,7 +423,7 @@ public:
 				// skip del type
 				continue;
 			auto &vm_info = virtual_machine.GetVMInfoByName(req.vm_name);
-			if (!TryAssignSleepingServer2VM(req, vm_info))
+			if (!TryAssignEmptyServer2VM(req, vm_info))
 				OrderServerBasedOnReq(req, vm_info);
 		}
 		// 输出购买信息
@@ -436,7 +438,6 @@ public:
 			int32_t st_server_id = p.second;
 			total_cost += buy_cost;
 			auto range = today_serverinfo2vmid_multimap.equal_range(&server_info);
-			// size_t k = today_serverinfo2vmid_multimap.count(&server_info);
 			for (auto each_it = range.first; each_it != range.second; ++each_it)
 			{
 				int32_t vm_id = each_it->second;
@@ -516,9 +517,9 @@ public:
 				bool &deploy_port = vm2server.second;
 				auto &server_status = bought_server.GetServerStatusById(server_id);
 				// output based on deploy type
+				// single port deploy
 				if (vm_info.deploy_type == virtual_machine.single_port)
 				{
-					// single deploy
 					if (server_status == bought_server.A_XB)
 					{
 						// deploy on B port
@@ -548,11 +549,11 @@ public:
 						printf("(%d, B)\n", server_id);
 					}
 				}
+				// double port deploy
 				else
 				{
 					server_status = bought_server.A_B;
-					if (sleeping_serverid_set.find(server_id) != sleeping_serverid_set.end())
-						sleeping_serverid_set.erase(server_id);
+					sleeping_serverid_set.erase(server_id);
 					full_serverid_set.emplace(server_id);
 					printf("(%d)\n", server_id);
 				}
@@ -579,7 +580,7 @@ public:
 int main()
 {
 #ifdef DEBUG_LOCAL
-	const char *test_file_path = "/home/jason/HuaWei_Contest/SDK/training-0.txt";
+	const char *test_file_path = "/home/jason/HuaWei_Contest/SDK/training-1.txt";
 	freopen(test_file_path, "r", stdin);
 	// const char *output_file_path = "/home/jason/HuaWei_Contest/SDK/training-0.out";
 	// freopen(output_file_path, "w", stdout);
