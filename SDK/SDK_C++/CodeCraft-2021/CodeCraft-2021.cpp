@@ -109,7 +109,7 @@ public:
 class VirtualMachine
 {
 public:
-	enum deploy_type_t : bool
+	enum DeployType : bool
 	{
 		single_port,
 		double_port
@@ -119,7 +119,7 @@ public:
 		std::string vm_name;
 		int32_t core;
 		int32_t memory;
-		deploy_type_t deploy_type; // 0 -> 单节点  1 -> 双节点
+		bool deploy_type; // 0 -> 单节点  1 -> 双节点
 	};
 
 	int32_t num_of_vm;
@@ -135,10 +135,7 @@ public:
 			vm[i].vm_name = common::get_string();
 			vm[i].core = common::read_int();
 			vm[i].memory = common::read_int();
-			if (common::read_int() == 0)
-				vm[i].deploy_type = single_port;
-			else
-				vm[i].deploy_type = double_port;
+			vm[i].deploy_type = common::read_int();
 			vmname2info_map.emplace(vm[i].vm_name, vm[i]);
 		}
 	}
@@ -244,21 +241,21 @@ public:
 	const Server &server;
 	int32_t nxt_server_id;
 
-	enum server_status_t : int8_t
+	enum ServerStatus : int8_t
 	{
 		XA_XB,
 		A_XB,
 		XA_B,
 		A_B
 	};
-	typedef pair<reference_wrapper<Server::ServerInfo>, server_status_t> bought_server_t;
+	typedef pair<Server::ServerInfo *, ServerStatus> bought_server_t;
 	unordered_map<int32_t, bought_server_t> serverid2info_map;
 
 	Server::ServerInfo &GetServerInfoById(int32_t server_id) const
 	{
-		return serverid2info_map.at(server_id).first;
+		return *serverid2info_map.at(server_id).first;
 	}
-	server_status_t &GetServerStatusById(int32_t server_id)
+	ServerStatus &GetServerStatusById(int32_t server_id)
 	{
 		return serverid2info_map.at(server_id).second;
 	}
@@ -270,7 +267,7 @@ public:
 		for (int32_t i = 0; i < num; i++)
 		{
 			int32_t server_id = st_server_id + i;
-			serverid2info_map.emplace(server_id, make_pair(server_info, XA_XB));
+			serverid2info_map.emplace(server_id, make_pair(&server_info, ServerStatus::XA_XB));
 			total_buy_cost += server_info.buy_cost;
 		}
 		return make_pair(total_buy_cost, st_server_id);
@@ -293,12 +290,12 @@ public:
 	RunningVM running_vm;
 	BoughtServer bought_server;
 
-	enum deploy_port_t : bool
+	enum DeployPort : bool
 	{
-		portA,
-		portB
+		portA = false,
+		portB = true
 	};
-	typedef pair<int32_t, deploy_port_t> vmid2serverid_t;
+	typedef pair<int32_t, bool> vmid2serverid_t;
 	unordered_map<int32_t, vmid2serverid_t> vmid2serverid_map;
 	unordered_set<int32_t> sleeping_serverid_set;
 	unordered_set<int32_t> single_empty_serverid_set;
@@ -459,11 +456,10 @@ public:
 			if (req.req_type == 0)
 			{
 				// del
-				running_vm.DelVM(req.vm_id);
-				auto &vm_info = virtual_machine.GetVMInfoByName(req.vm_name);
+				auto &vm_info = running_vm.GetVMInfoById(req.vm_id);
 				vmid2serverid_t &vm2server = vmid2serverid_map.at(req.vm_id);
 				int32_t server_id = vm2server.first;
-				deploy_port_t deploy_port = vm2server.second;
+				bool deploy_port = vm2server.second;
 				auto &server_status = bought_server.GetServerStatusById(server_id);
 				if (vm_info.deploy_type == virtual_machine.single_port)
 				{
@@ -508,6 +504,7 @@ public:
 					full_serverid_set.erase(server_id);
 					sleeping_serverid_set.emplace(server_id);
 				}
+				running_vm.DelVM(req.vm_id);
 				vmid2serverid_map.erase(req.vm_id);
 			}
 			else
@@ -516,8 +513,7 @@ public:
 				running_vm.AddVM(req.vm_id, vm_info);
 				vmid2serverid_t &vm2server = vmid2serverid_map.at(req.vm_id);
 				int32_t server_id = vm2server.first;
-				deploy_port_t &deploy_port = vm2server.second;
-				auto &server_info = bought_server.GetServerInfoById(server_id);
+				bool &deploy_port = vm2server.second;
 				auto &server_status = bought_server.GetServerStatusById(server_id);
 				// output based on deploy type
 				if (vm_info.deploy_type == virtual_machine.single_port)
@@ -583,10 +579,10 @@ public:
 int main()
 {
 #ifdef DEBUG_LOCAL
-	const char *test_file_path = "/home/jason/HuaWei_Contest/SDK/training-1.txt";
+	const char *test_file_path = "/home/jason/HuaWei_Contest/SDK/training-0.txt";
 	freopen(test_file_path, "r", stdin);
-	const char *output_file_path = "/home/jason/HuaWei_Contest/SDK/training-1.out";
-	freopen(output_file_path, "w", stdout);
+	// const char *output_file_path = "/home/jason/HuaWei_Contest/SDK/training-0.out";
+	// freopen(output_file_path, "w", stdout);
 #endif
 	// 读取所有输入数据
 	Server server;
