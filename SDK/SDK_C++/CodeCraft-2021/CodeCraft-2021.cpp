@@ -608,7 +608,7 @@ public:
 					continue;
 				if (IsServerFitVm(server_info, server_status, vm_info))
 				{
-					if (common::rand_between(0, 100) > 50)
+					if (common::rand_between(0, 100) > 20)
 					{
 						if (vm_info.deploy_type == virtual_machine.single_port)
 						{
