@@ -591,9 +591,9 @@ public:
 	}
 	void Migrate()
 	{
-		size_t migration_num = floor((double)running_vm.vmid2info_map.size() * 0.005);
-		printf("(migration, %zu)\n", migration_num);
-		while (migration_num)
+		int32_t migration_num = floor((double)running_vm.vmid2info_map.size() * 0.001);
+		printf("(migration, %d)\n", migration_num);
+		while (migration_num > 0)
 		{
 			auto &vmid2info_it = running_vm.GetRandomVmid2infoIter();
 			int32_t vm_id = vmid2info_it.first;
@@ -612,7 +612,7 @@ public:
 					{
 						if (vm_info.deploy_type == virtual_machine.single_port)
 						{
-							DeployPort deploy_port;
+							DeployPort deploy_port = portA;
 							if (server_status == bought_server.XA_XB)
 							{
 								deploy_port = portA;
