@@ -16,6 +16,13 @@ using namespace std;
 auto time_start = chrono::steady_clock::now();
 namespace common
 {
+	std::random_device rd;
+	std::mt19937 gen(rd()); // seed the generator
+	inline int32_t rand_between(int32_t left, int32_t right)
+	{
+		std::uniform_int_distribution<> dis(left, right);
+		return dis(gen);
+	}
 	inline int32_t read_int()
 	{
 		char c = std::getchar();
@@ -247,7 +254,10 @@ public:
 	{
 		vmid2info_map.erase(vm_id);
 	}
-
+	pair<const int32_t, reference_wrapper<VirtualMachine::VMInfo>> &GetRandomVmid2infoIter()
+	{
+		return *std::next(std::begin(vmid2info_map), common::rand_between(0, vmid2info_map.size() - 1));
+	}
 	RunningVM(const VirtualMachine &vm) : vm(vm) {}
 };
 
@@ -355,6 +365,24 @@ public:
 		}
 		return false;
 	}
+	bool IsServerFitVm(Server::ServerInfo const &server_info, BoughtServer::ServerStatus const &server_status, VirtualMachine::VMInfo const &vm_info) const
+	{
+		if (vm_info.deploy_type == virtual_machine.single_port)
+		{
+			if (server_status == BoughtServer::A_B)
+				return false;
+			if (server_info.core_half >= vm_info.core && server_info.memory_half >= vm_info.memory)
+				return true;
+		}
+		else
+		{
+			if (server_status != BoughtServer::XA_XB)
+				return false;
+			if (server_info.core >= vm_info.core && server_info.memory >= vm_info.memory)
+				return true;
+		}
+		return false;
+	}
 	void BuyServerOnFirstDay()
 	{
 		// find the day that need most servers
@@ -394,25 +422,20 @@ public:
 
 		// buy server
 		max_req_server >>= 1;
-		const size_t server_type_num = min(server.num_of_server,5);
+		const size_t server_type_num = min(server.num_of_server, 5);
 		printf("(purchase, %zu)\n", server_type_num);
 
 		unordered_set<size_t> tmp_already_bought_server_set;
-		std::random_device rd; 
-		std::mt19937 gen(rd()); // seed the generator
-		std::uniform_int_distribution<> serveridx_dis(0, server.num_of_server-1); // define the range
-		std::uniform_int_distribution<> ordernum_dis(1, max_req_server>>1);
 		for (size_t i = 0; i < server_type_num; i++)
 		{
 			size_t idx;
 			do
 			{
-				idx = serveridx_dis(gen);
-			}
-			while (tmp_already_bought_server_set.find(idx)!=tmp_already_bought_server_set.end());
+				idx = common::rand_between(0, server.num_of_server - 1);
+			} while (tmp_already_bought_server_set.find(idx) != tmp_already_bought_server_set.end());
 			auto &server_info = server.server[idx];
 			tmp_already_bought_server_set.emplace(idx);
-			int32_t order_num = ordernum_dis(gen);
+			int32_t order_num = common::rand_between(1, max_req_server >> 1);
 			pair<int64_t, int32_t> p = bought_server.BuyServer(server_info, order_num);
 			int64_t buy_cost = p.first;
 			total_cost += buy_cost;
@@ -568,7 +591,58 @@ public:
 	}
 	void Migrate()
 	{
-		printf("(migration, 0)\n");
+		size_t migration_num = floor((double)running_vm.vmid2info_map.size() * 0.005);
+		printf("(migration, %zu)\n", migration_num);
+		while (migration_num)
+		{
+			auto &vmid2info_it = running_vm.GetRandomVmid2infoIter();
+			int32_t vm_id = vmid2info_it.first;
+			auto &vm_info = vmid2info_it.second.get();
+			for (auto &serverid2info_it : bought_server.serverid2info_map)
+			{
+				int32_t server_id = serverid2info_it.first;
+				auto &cur_server = serverid2info_it.second;
+				auto &server_info = *cur_server.first;
+				auto &server_status = cur_server.second;
+				if (vmid2serverid_map.at(vm_id).first == server_id)
+					continue;
+				if (IsServerFitVm(server_info, server_status, vm_info))
+				{
+					if (common::rand_between(0, 100) > 50)
+					{
+						if (vm_info.deploy_type == virtual_machine.single_port)
+						{
+							DeployPort deploy_port;
+							if (server_status == bought_server.XA_XB)
+							{
+								deploy_port = portA;
+								server_status = bought_server.A_XB;
+							}
+							else if (server_status == bought_server.A_XB)
+							{
+								deploy_port = portB;
+								server_status = bought_server.A_B;
+							}
+							else if (server_status == bought_server.XA_B)
+							{
+								deploy_port = portA;
+								server_status = bought_server.A_B;
+							}
+							vmid2serverid_map.emplace(vm_id, make_pair(server_id, deploy_port));
+							printf("(%d, %d, %c)\n", vm_id, server_id, deploy_port + 'A');
+						}
+						else
+						{
+							server_status = bought_server.A_B;
+							vmid2serverid_map.emplace(vm_id, make_pair(server_id, 0));
+							printf("(%d, %d)\n", vm_id, server_id);
+						}
+						--migration_num;
+						break;
+					}
+				}
+			}
+		}
 	}
 	void ProcessRequest()
 	{
