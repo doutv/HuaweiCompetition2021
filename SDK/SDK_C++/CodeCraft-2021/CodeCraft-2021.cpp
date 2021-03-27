@@ -297,22 +297,24 @@ public:
 	};
 	typedef pair<int32_t, bool> vmid2serverid_t;
 	unordered_map<int32_t, vmid2serverid_t> vmid2serverid_map;
-	unordered_set<int32_t> sleeping_serverid_set;
-	unordered_set<int32_t> single_empty_serverid_set;
-	unordered_set<int32_t> full_serverid_set;
+	// unordered_set<int32_t> sleeping_serverid_set;
+	// unordered_set<int32_t> single_empty_serverid_set;
+	// unordered_set<int32_t> full_serverid_set;
 	int64_t total_cost;
 	int32_t today_id;
 
 	unordered_map<string, int32_t> today_buy_servername2num_map;
 	unordered_multimap<Server::ServerInfo *, int32_t> today_serverinfo2vmid_multimap;
-	typedef pair<Server::ServerInfo, int32_t> serverinfo_id_t;
+	typedef pair<BoughtServer::bought_server_t, int32_t> serverinfo_id_t;
 	class AssignSleepingServerComp
 	{
 	public:
 		bool operator()(serverinfo_id_t const &x, serverinfo_id_t const &y) const
 		{
-			return (x.first.core > y.first.core) ||
-				   (x.first.core == y.first.core && x.first.memory > y.first.memory);
+			auto &x_server_info = *x.first.first;
+			auto &y_server_info = *y.first.first;
+			return (x_server_info.core > y_server_info.core) ||
+				   (x_server_info.core == y_server_info.core && x_server_info.memory > y_server_info.memory);
 		}
 	};
 	bool IsServerFitVm(Server::ServerInfo const &server_info, VirtualMachine::VMInfo const &vm_info) const
@@ -332,67 +334,88 @@ public:
 	void EvaluateDailyCost()
 	{
 		int64_t daily_cost = 0;
-		for (int32_t server_id : single_empty_serverid_set)
-		{
-			daily_cost += bought_server.GetServerInfoById(server_id).daily_cost;
-		}
-		for (int32_t server_id : full_serverid_set)
-		{
-			daily_cost += bought_server.GetServerInfoById(server_id).daily_cost;
-		}
+		// for (int32_t server_id : single_empty_serverid_set)
+		// {
+		// 	daily_cost += bought_server.GetServerInfoById(server_id).daily_cost;
+		// }
+		// for (int32_t server_id : full_serverid_set)
+		// {
+		// 	daily_cost += bought_server.GetServerInfoById(server_id).daily_cost;
+		// }
 		total_cost += daily_cost;
 	}
 	bool TryAssignEmptyServer2VM(VMRequest::Req req, VirtualMachine::VMInfo &vm_info)
 	{
 		priority_queue<serverinfo_id_t, vector<serverinfo_id_t>, AssignSleepingServerComp> q;
-		unordered_set<Server::ServerInfo *> serverinfo_set;
 		if (vm_info.deploy_type == virtual_machine.single_port)
 		{
 			// single deploy
 			// First try to find a single empty server
 			// since it does not need to turn on a sleeping server
-			for (int32_t server_id : single_empty_serverid_set)
+			for (auto &it : bought_server.serverid2info_map)
 			{
-				auto &server_info_ref = bought_server.GetServerInfoById(server_id);
-				if (serverinfo_set.find(&server_info_ref) != serverinfo_set.end())
-					// The server info already in queue
-					continue;
-				auto server_info = server_info_ref;
-				// single deploy only use half of the core and memory
-				if (IsServerFitVm(server_info_ref, vm_info))
+				int32_t server_id = it.first;
+				auto cur_server = it.second;
+				auto server_info = cur_server.first;
+				auto server_status = cur_server.second;
+				if (server_status == bought_server.A_XB || server_status == bought_server.XA_B)
 				{
-					serverinfo_set.emplace(&server_info_ref);
-					q.push(make_pair(server_info, server_id));
+					// single deploy only use half of the core and memory
+					if (IsServerFitVm(*server_info, vm_info))
+					{
+						q.push(make_pair(cur_server, server_id));
+					}
 				}
 			}
 			if (!q.empty())
 			{
 				int32_t server_id = q.top().second;
-				vmid2serverid_map.emplace(req.vm_id, make_pair(server_id, 0));
-				single_empty_serverid_set.erase(server_id);
+				auto &server_status = bought_server.GetServerStatusById(server_id);
+				DeployPort deploy_port;
+				if (server_status == bought_server.A_XB)
+					deploy_port = portB;
+				else if (server_status == bought_server.XA_B)
+					deploy_port = portA;
+				server_status = bought_server.A_B;
+				vmid2serverid_map.emplace(req.vm_id, make_pair(server_id, deploy_port));
+				running_vm.AddVM(req.vm_id,vm_info);
 				return true;
 			}
 			// no need to clear q and serverinfo_set
 		}
 		// double deploy or single deploy cannot find proper server
-		for (int32_t server_id : sleeping_serverid_set)
+		for (auto &it : bought_server.serverid2info_map)
 		{
-			auto &server_info_ref = bought_server.GetServerInfoById(server_id);
-			if (serverinfo_set.find(&server_info_ref) != serverinfo_set.end())
-				// The server info already in queue
-				continue;
-			auto server_info = server_info_ref;
-			if (IsServerFitVm(server_info_ref, vm_info))
+			int32_t server_id = it.first;
+			auto cur_server = it.second;
+			auto server_info = cur_server.first;
+			auto server_status = cur_server.second;
+			if (server_status == bought_server.XA_XB)
 			{
-				serverinfo_set.emplace(&server_info_ref);
-				q.push(make_pair(server_info, server_id));
+				// single deploy only use half of the core and memory
+				if (IsServerFitVm(*server_info, vm_info))
+				{
+					q.push(make_pair(cur_server, server_id));
+				}
 			}
 		}
 		if (!q.empty())
 		{
 			int32_t server_id = q.top().second;
-			vmid2serverid_map.emplace(req.vm_id, make_pair(server_id, 0));
-			sleeping_serverid_set.erase(server_id);
+			auto &server_status = bought_server.GetServerStatusById(server_id);
+			DeployPort deploy_port = portA;
+			if (server_status == bought_server.XA_XB)
+			{
+				if (vm_info.deploy_type == virtual_machine.single_port)
+				{
+					deploy_port = portA;
+					server_status = bought_server.A_XB;
+				}
+				else
+					server_status = bought_server.A_B;
+			}
+			vmid2serverid_map.emplace(req.vm_id, make_pair(server_id, deploy_port));
+			running_vm.AddVM(req.vm_id,vm_info);
 			return true;
 		}
 		else
@@ -410,8 +433,8 @@ public:
 		}
 		auto &server_info = server.GetServerInfoByName(q.top().server_name);
 		++today_buy_servername2num_map[server_info.server_name];
-		// bind vmid to server
-		today_serverinfo2vmid_multimap.emplace(&server_info, req.vm_id);
+		today_serverinfo2vmid_multimap.emplace(&server_info, req.vm_id); // bind vmid to server
+		running_vm.AddVM(req.vm_id, vm_info);
 	}
 	void Buy()
 	{
@@ -419,8 +442,8 @@ public:
 		today_serverinfo2vmid_multimap.clear();
 		for (const VMRequest::Req &req : request.req_list.at(today_id))
 		{
+			// skip del type
 			if (req.req_type == 0)
-				// skip del type
 				continue;
 			auto &vm_info = virtual_machine.GetVMInfoByName(req.vm_name);
 			if (!TryAssignEmptyServer2VM(req, vm_info))
@@ -440,8 +463,22 @@ public:
 			auto range = today_serverinfo2vmid_multimap.equal_range(&server_info);
 			for (auto each_it = range.first; each_it != range.second; ++each_it)
 			{
+				int32_t server_id = st_server_id++;
 				int32_t vm_id = each_it->second;
-				vmid2serverid_map.emplace(vm_id, make_pair(st_server_id++, 0));
+				auto &vm_info = running_vm.GetVMInfoById(vm_id);
+				auto &server_status = bought_server.GetServerStatusById(server_id);
+				DeployPort deploy_port = portA;
+				if (server_status == bought_server.XA_XB)
+				{
+					if (vm_info.deploy_type == virtual_machine.single_port)
+					{
+						deploy_port = portA;
+						server_status = bought_server.A_XB;
+					}
+					else
+						server_status = bought_server.A_B;
+				}
+				vmid2serverid_map.emplace(vm_id, make_pair(server_id, deploy_port));
 			}
 			printf("(%s, %d)\n", server_name.c_str(), num);
 		}
@@ -471,39 +508,29 @@ public:
 						if (server_status == bought_server.A_B)
 						{
 							server_status = bought_server.XA_B;
-							full_serverid_set.erase(server_id);
-							single_empty_serverid_set.emplace(server_id);
 						}
 						else if (server_status == bought_server.A_XB)
 						{
 							server_status = bought_server.XA_XB;
-							single_empty_serverid_set.erase(server_id);
-							sleeping_serverid_set.emplace(server_id);
 						}
 					}
-					else
+					else if (deploy_port == portB)
 					{
 						// deploy on B port
 						if (server_status == bought_server.A_B)
 						{
 							server_status = bought_server.A_XB;
-							full_serverid_set.erase(server_id);
-							single_empty_serverid_set.emplace(server_id);
 						}
 						else if (server_status == bought_server.XA_B)
 						{
 							server_status = bought_server.XA_XB;
-							single_empty_serverid_set.erase(server_id);
-							sleeping_serverid_set.emplace(server_id);
 						}
 					}
 				}
-				else
+				else if (vm_info.deploy_type == virtual_machine.double_port)
 				{
 					// double deploy
 					server_status = bought_server.XA_XB;
-					full_serverid_set.erase(server_id);
-					sleeping_serverid_set.emplace(server_id);
 				}
 				running_vm.DelVM(req.vm_id);
 				vmid2serverid_map.erase(req.vm_id);
@@ -511,50 +538,16 @@ public:
 			else
 			{
 				auto &vm_info = virtual_machine.GetVMInfoByName(req.vm_name);
-				running_vm.AddVM(req.vm_id, vm_info);
 				vmid2serverid_t &vm2server = vmid2serverid_map.at(req.vm_id);
 				int32_t server_id = vm2server.first;
 				bool &deploy_port = vm2server.second;
-				auto &server_status = bought_server.GetServerStatusById(server_id);
 				// output based on deploy type
-				// single port deploy
 				if (vm_info.deploy_type == virtual_machine.single_port)
 				{
-					if (server_status == bought_server.A_XB)
-					{
-						// deploy on B port
-						server_status = bought_server.A_B;
-						deploy_port = portB;
-						single_empty_serverid_set.erase(server_id);
-						full_serverid_set.emplace(server_id);
-						printf("(%d, B)\n", server_id);
-					}
-					else if (server_status == bought_server.XA_B)
-					{
-						// deploy on A port
-						server_status = bought_server.A_B;
-						deploy_port = portA;
-						single_empty_serverid_set.erase(server_id);
-						full_serverid_set.emplace(server_id);
-						printf("(%d, A)\n", server_id);
-					}
-					else if (server_status == bought_server.XA_XB)
-					{
-						// deploy on A port
-						server_status = bought_server.A_XB;
-						deploy_port = portA;
-						if (sleeping_serverid_set.find(server_id) != sleeping_serverid_set.end())
-							sleeping_serverid_set.erase(server_id);
-						single_empty_serverid_set.emplace(server_id);
-						printf("(%d, B)\n", server_id);
-					}
+					printf("(%d, %c)\n",server_id,deploy_port+'A');
 				}
-				// double port deploy
-				else
+				else if (vm_info.deploy_type == virtual_machine.double_port)
 				{
-					server_status = bought_server.A_B;
-					sleeping_serverid_set.erase(server_id);
-					full_serverid_set.emplace(server_id);
 					printf("(%d)\n", server_id);
 				}
 			}
@@ -580,7 +573,7 @@ public:
 int main()
 {
 #ifdef DEBUG_LOCAL
-	const char *test_file_path = "/home/jason/HuaWei_Contest/SDK/training-1.txt";
+	const char *test_file_path = "/home/jason/HuaWei_Contest/SDK/training-0.txt";
 	freopen(test_file_path, "r", stdin);
 	// const char *output_file_path = "/home/jason/HuaWei_Contest/SDK/training-0.out";
 	// freopen(output_file_path, "w", stdout);
