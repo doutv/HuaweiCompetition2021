@@ -1,5 +1,6 @@
 // #define DEBUG_LOCAL
 
+#include <cmath>
 #include <chrono>
 #include <iostream>
 #include <cstdio>
@@ -75,6 +76,22 @@ public:
 	static const int32_t server_max_size = 100;
 	ServerInfo server[server_max_size];
 	unordered_map<string, reference_wrapper<ServerInfo>> servername2info_map;
+
+	class EvaluateServerValueComp
+	{
+	public:
+		double EvaluateServerValue(ServerInfo const &x) const
+		{
+			// evaluate server value
+			int32_t estimated_num_of_day = 500;
+			return (double)((x.core + x.memory) << 19) / (double)(x.buy_cost + x.daily_cost * estimated_num_of_day);
+		}
+		bool operator()(ServerInfo const &x, ServerInfo const &y) const
+		{
+			return EvaluateServerValue(x) < EvaluateServerValue(y);
+		}
+	};
+	priority_queue<ServerInfo, vector<ServerInfo>, EvaluateServerValueComp> evaluate_q;
 	void Init()
 	{
 		cin >> num_of_server;
@@ -95,17 +112,17 @@ public:
 	{
 		return servername2info_map.at(server_name);
 	}
-	void PrintInfo()
+	void SortServer()
 	{
-		for (int32_t i = 0; i < num_of_server; ++i)
+		for (int32_t i = 0; i < num_of_server; i++)
 		{
-			std::cout << server[i].server_name << ": ";
-			printf("%dC %dG $%d $%d\n", server[i].core, server[i].memory, server[i].buy_cost, server[i].daily_cost);
+			evaluate_q.push(server[i]);
 		}
 	}
 
 	Server() {}
 };
+
 class VirtualMachine
 {
 public:
@@ -272,9 +289,18 @@ public:
 		}
 		return make_pair(total_buy_cost, st_server_id);
 	}
-	void BuyServerAtOneTime()
+	int64_t CalculateDailyCost()
 	{
-		// 一次性买够服务器
+		int64_t cost = 0;
+		for (auto &it : serverid2info_map)
+		{
+			auto cur_server = it.second;
+			auto server_info = cur_server.first;
+			auto server_status = cur_server.second;
+			if (server_status != ServerStatus::XA_XB)
+				cost += server_info->daily_cost;
+		}
+		return cost;
 	}
 	BoughtServer(const Server &server) : server(server)
 	{
@@ -284,7 +310,7 @@ public:
 class Greedy
 {
 public:
-	const Server &server;
+	Server &server;
 	const VirtualMachine &virtual_machine;
 	const VMRequest &request;
 	RunningVM running_vm;
@@ -297,9 +323,6 @@ public:
 	};
 	typedef pair<int32_t, bool> vmid2serverid_t;
 	unordered_map<int32_t, vmid2serverid_t> vmid2serverid_map;
-	// unordered_set<int32_t> sleeping_serverid_set;
-	// unordered_set<int32_t> single_empty_serverid_set;
-	// unordered_set<int32_t> full_serverid_set;
 	int64_t total_cost;
 	int32_t today_id;
 
@@ -331,18 +354,76 @@ public:
 		}
 		return false;
 	}
-	void EvaluateDailyCost()
+	void BuyServerOnFirstDay()
 	{
-		int64_t daily_cost = 0;
-		// for (int32_t server_id : single_empty_serverid_set)
-		// {
-		// 	daily_cost += bought_server.GetServerInfoById(server_id).daily_cost;
-		// }
-		// for (int32_t server_id : full_serverid_set)
-		// {
-		// 	daily_cost += bought_server.GetServerInfoById(server_id).daily_cost;
-		// }
-		total_cost += daily_cost;
+		// find the day that need most servers
+		int target_day = 0;
+		int max_req_server = 0;
+		int cur_req_server = 0;
+		unordered_map<int32_t, bool> tmp_vmid2deploytype_map;
+		for (int day = 0; day < request.num_of_day; day++)
+		{
+			for (auto const &req : request.req_list.at(day))
+			{
+				if (req.req_type == 0)
+				{
+					bool deploy_type = tmp_vmid2deploytype_map.at(req.vm_id);
+					if (deploy_type == virtual_machine.single_port)
+						--cur_req_server;
+					else
+						cur_req_server -= 2;
+					tmp_vmid2deploytype_map.erase(req.vm_id);
+				}
+				else if (req.req_type == 1)
+				{
+					auto &vm_info = virtual_machine.GetVMInfoByName(req.vm_name);
+					tmp_vmid2deploytype_map.emplace(req.vm_id, vm_info.deploy_type);
+					if (vm_info.deploy_type == virtual_machine.single_port)
+						++cur_req_server;
+					else
+						cur_req_server += 2;
+				}
+			}
+			if (cur_req_server > max_req_server)
+			{
+				max_req_server = cur_req_server;
+				target_day = day;
+			}
+		}
+
+		// buy server
+		server.SortServer();
+		max_req_server >>= 1;
+		vector<int32_t> order_server{3,2,1};
+		for (size_t i=0;i<20;i++)
+		{
+			order_server.push_back(1);
+		}
+		int32_t sum_frac=0;
+		for (int32_t each:order_server)
+			sum_frac+=each;
+		size_t server_type_num = min((size_t)server.num_of_server, order_server.size());
+		printf("(purchase, %zu)\n", server_type_num);
+		for (size_t i = 0; i < server_type_num; i++)
+		{
+			int32_t order_num = (double)order_server.at(i)/sum_frac * max_req_server;
+			if (order_num <= 0)
+				continue;
+			auto &server_info = server.GetServerInfoByName(server.evaluate_q.top().server_name);
+			server.evaluate_q.pop();
+			pair<int64_t, int32_t> p = bought_server.BuyServer(server_info, order_num);
+			int64_t buy_cost = p.first;
+			total_cost += buy_cost;
+			printf("(%s, %d)\n", server_info.server_name.c_str(), order_num);
+		}
+		for (const VMRequest::Req &req : request.req_list.at(0))
+		{
+			// skip del type
+			if (req.req_type == 0)
+				continue;
+			auto &vm_info = virtual_machine.GetVMInfoByName(req.vm_name);
+			TryAssignEmptyServer2VM(req, vm_info);
+		}
 	}
 	bool TryAssignEmptyServer2VM(VMRequest::Req req, VirtualMachine::VMInfo &vm_info)
 	{
@@ -378,7 +459,7 @@ public:
 					deploy_port = portA;
 				server_status = bought_server.A_B;
 				vmid2serverid_map.emplace(req.vm_id, make_pair(server_id, deploy_port));
-				running_vm.AddVM(req.vm_id,vm_info);
+				running_vm.AddVM(req.vm_id, vm_info);
 				return true;
 			}
 			// no need to clear q and serverinfo_set
@@ -415,7 +496,7 @@ public:
 					server_status = bought_server.A_B;
 			}
 			vmid2serverid_map.emplace(req.vm_id, make_pair(server_id, deploy_port));
-			running_vm.AddVM(req.vm_id,vm_info);
+			running_vm.AddVM(req.vm_id, vm_info);
 			return true;
 		}
 		else
@@ -438,8 +519,6 @@ public:
 	}
 	void Buy()
 	{
-		today_buy_servername2num_map.clear();
-		today_serverinfo2vmid_multimap.clear();
 		for (const VMRequest::Req &req : request.req_list.at(today_id))
 		{
 			// skip del type
@@ -482,6 +561,8 @@ public:
 			}
 			printf("(%s, %d)\n", server_name.c_str(), num);
 		}
+		today_buy_servername2num_map.clear();
+		today_serverinfo2vmid_multimap.clear();
 	}
 	void Migrate()
 	{
@@ -544,7 +625,7 @@ public:
 				// output based on deploy type
 				if (vm_info.deploy_type == virtual_machine.single_port)
 				{
-					printf("(%d, %c)\n",server_id,deploy_port+'A');
+					printf("(%d, %c)\n", server_id, deploy_port + 'A');
 				}
 				else if (vm_info.deploy_type == virtual_machine.double_port)
 				{
@@ -557,23 +638,25 @@ public:
 	{
 		// 对于每一天的操作，会先按顺序执行选手输出的购买操作，然后按顺序执行选手输出的迁移操作，最后按顺序执行当天的创建和删除操作。
 		// 输入中可能存在当天创建后当天删除的虚拟机，对于这些虚拟机请求，你依然需要按顺序正常处理。
-		// BuyAllServerAtFirst();
 		for (today_id = 0; today_id < request.num_of_day; today_id++)
 		{
-			Buy();
+			if (today_id == 0)
+				BuyServerOnFirstDay();
+			else
+				Buy();
 			Migrate();
 			ProcessRequest();
-			EvaluateDailyCost();
+			total_cost += bought_server.CalculateDailyCost();
 		}
 	}
-	Greedy(const Server &server, const VirtualMachine &virtual_machine, const VMRequest &request)
+	Greedy(Server &server, const VirtualMachine &virtual_machine, const VMRequest &request)
 		: server(server), virtual_machine(virtual_machine), request(request), running_vm(virtual_machine), bought_server(server) {}
 };
 
 int main()
 {
 #ifdef DEBUG_LOCAL
-	const char *test_file_path = "/home/jason/HuaWei_Contest/SDK/training-0.txt";
+	const char *test_file_path = "/home/jason/HuaWei_Contest/SDK/training-1.txt";
 	freopen(test_file_path, "r", stdin);
 	// const char *output_file_path = "/home/jason/HuaWei_Contest/SDK/training-0.out";
 	// freopen(output_file_path, "w", stdout);
